@@ -195,10 +195,10 @@ impl InvokeUiSession for SciterHandler {
         self.call("setCursorPosition", &make_args!(cp.x, cp.y));
     }
 
-    fn set_connection_type(&self, is_secured: bool, direct: bool, stream_type: &str) {
+    fn set_connection_type(&self, is_secured: bool, direct: bool, stream_type: &str, endpoint: &str) {
         self.call(
             "setConnectionType",
-            &make_args!(is_secured, direct, stream_type.to_string()),
+            &make_args!(is_secured, direct, stream_type.to_string(), endpoint.to_string()),
         );
     }
 
@@ -504,6 +504,8 @@ impl sciter::EventHandler for SciterSession {
         fn get_id();
         fn get_default_pi();
         fn get_option(String);
+        fn get_image_sharpening();
+        fn set_image_sharpening(String);
         fn t(String);
         fn set_option(String, String);
         fn input_os_password(String, bool);
@@ -564,6 +566,9 @@ impl sciter::EventHandler for SciterSession {
         fn take_screenshot(i32, String);
         fn handle_screenshot(String);
         fn get_toggle_option(String);
+        fn is_lan_quality_optimization_available();
+        fn get_lan_quality_optimization();
+        fn set_lan_quality_optimization(bool);
         fn is_privacy_mode_supported();
         fn toggle_option(String);
         fn toggle_privacy_mode(String, bool);

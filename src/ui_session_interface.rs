@@ -388,6 +388,29 @@ impl<T: InvokeUiSession> Session<T> {
         }
     }
 
+    pub fn is_lan_quality_optimization_available(&self) -> bool {
+        self.lc
+            .read()
+            .unwrap()
+            .is_lan_quality_optimization_available()
+    }
+
+    pub fn get_lan_quality_optimization(&self) -> bool {
+        self.lc.read().unwrap().get_lan_quality_optimization()
+    }
+
+    pub fn set_lan_quality_optimization(&self, enabled: bool) {
+        self.lc
+            .write()
+            .unwrap()
+            .set_lan_quality_optimization(enabled);
+        let image_quality = self.get_image_quality();
+        self.save_image_quality(image_quality);
+        self.update_supported_decodings();
+        self.send(Data::ResetDecoder(None));
+        self.send(Data::Message(LoginConfigHandler::refresh()));
+    }
+
     pub fn toggle_privacy_mode(&self, impl_key: String, on: bool) {
         let mut misc = Misc::new();
         misc.set_toggle_privacy_mode(TogglePrivacyMode {
@@ -635,6 +658,18 @@ impl<T: InvokeUiSession> Session<T> {
             return self.lc.read().unwrap().get_remote_dir();
         }
         self.lc.read().unwrap().get_option(&k)
+    }
+
+    pub fn get_image_sharpening(&self) -> i32 {
+        self.lc.read().unwrap().get_image_sharpening()
+    }
+
+    pub fn set_image_sharpening(&self, v: String) {
+        self.lc
+            .write()
+            .unwrap()
+            .set_option("image-sharpening".to_owned(), v);
+        self.send(Data::Message(LoginConfigHandler::refresh()));
     }
 
     pub fn set_option(&self, k: String, mut v: String) {
@@ -1681,7 +1716,7 @@ pub trait InvokeUiSession: Send + Sync + Clone + 'static + Sized + Default {
     fn set_permission(&self, name: &str, value: bool);
     fn close_success(&self);
     fn update_quality_status(&self, qs: QualityStatus);
-    fn set_connection_type(&self, is_secured: bool, direct: bool, stream_type: &str);
+    fn set_connection_type(&self, is_secured: bool, direct: bool, stream_type: &str, endpoint: &str);
     fn set_fingerprint(&self, fingerprint: String);
     fn job_error(&self, id: i32, err: String, file_num: i32);
     fn job_done(&self, id: i32, file_num: i32);

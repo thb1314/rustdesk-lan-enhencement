@@ -536,6 +536,7 @@ function self.closing() {
 
 var qualityMonitor;
 var qualityMonitorData = [];
+var connectionRouteText = "";
 
 class QualityMonitor: Reactor.Component
 {
@@ -548,6 +549,7 @@ class QualityMonitor: Reactor.Component
 
     function render() {
         return <div >
+            {connectionRouteText ? <div .connection-info>{connectionRouteText}</div> : ""}
             <div>
                 Speed: {qualityMonitorData[0]}
             </div>

@@ -4574,8 +4574,6 @@ dependencies = [
 [[package]]
 name = "libsodium-sys"
 version = "0.2.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b779387cd56adfbc02ea4a668e704f729be8d6a6abd2c27ca5ee537849a92fd"
 dependencies = [
  "cc",
  "libc",
@@ -4685,7 +4683,6 @@ dependencies = [
 [[package]]
 name = "machine-uid"
 version = "0.3.0"
-source = "git+https://github.com/rustdesk-org/machine-uid#381ff579c1dc3a6c54db9dfec47c44bcb0246542"
 dependencies = [
  "bindgen 0.59.2",
  "cc",

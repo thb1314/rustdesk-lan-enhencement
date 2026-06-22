@@ -1,8 +1,9 @@
-#[cfg(target_os = "windows")]
 fn build_c_impl() {
     let mut build = cc::Build::new();
 
     build.file("src/windows/wf_cliprdr.c");
+    println!("cargo:rustc-link-lib=ole32");
+    println!("cargo:rustc-link-lib=uuid");
 
     {
         build.flag_if_supported("-Wno-c++0x-extensions");
@@ -30,6 +31,7 @@ fn build_c_impl() {
 }
 
 fn main() {
-    #[cfg(target_os = "windows")]
-    build_c_impl();
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        build_c_impl();
+    }
 }

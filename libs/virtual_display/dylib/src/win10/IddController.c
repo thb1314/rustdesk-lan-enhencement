@@ -2,12 +2,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <newdev.h>
+#ifdef __MINGW32__
+#include "./swdevice_compat.h"
+#else
 #include <swdevice.h>
+#endif
 #include <strsafe.h>
 #include <cfgmgr32.h>
 #include <combaseapi.h>
 
 #include "./Public.h"
+
+#ifdef __MINGW32__
+WINBOOL WINAPI DiUninstallDriverW(
+    HWND hwndParent,
+    LPCWSTR infPath,
+    DWORD flags,
+    PBOOL needReboot);
+#endif
 
 typedef struct DeviceCreateCallbackContext
 {
@@ -72,7 +84,7 @@ const char* GetLastMsg()
     return g_lastMsg;
 }
 
-BOOL InstallUpdate(LPCWSTR fullInfPath, PBOOL rebootRequired)
+BOOL InstallUpdate(LPCTSTR fullInfPath, PBOOL rebootRequired)
 {
     SetLastMsg("Success");
 
@@ -118,7 +130,7 @@ BOOL InstallUpdate(LPCWSTR fullInfPath, PBOOL rebootRequired)
     return TRUE;
 }
 
-BOOL Uninstall(LPCWSTR fullInfPath, PBOOL rebootRequired)
+BOOL Uninstall(LPCTSTR fullInfPath, PBOOL rebootRequired)
 {
     SetLastMsg("Success");
 
@@ -1003,4 +1015,3 @@ LPSTR formatErrorString(DWORD error)
     );
     return errorString;
 }
-

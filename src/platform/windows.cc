@@ -3,6 +3,7 @@
 #include <tlhelp32.h>
 #include <comdef.h>
 #include <xpsprint.h>
+#include <algorithm>
 #include <cstdio>
 #include <cstdint>
 #include <intrin.h>
@@ -14,6 +15,53 @@
 #include <vector>
 #include <sddl.h>
 #include <memory>
+
+#if defined(__MINGW32__)
+#ifndef WTSSessionInfoEx
+#define WTSSessionInfoEx static_cast<WTS_INFO_CLASS>(25)
+#endif
+
+#ifndef WTS_SESSIONSTATE_UNKNOWN
+#define WTS_SESSIONSTATE_UNKNOWN 0xFFFFFFFF
+#endif
+
+#ifndef WTS_SESSIONSTATE_LOCK
+#define WTS_SESSIONSTATE_LOCK 0x0
+#endif
+
+#ifndef WTS_SESSIONSTATE_UNLOCK
+#define WTS_SESSIONSTATE_UNLOCK 0x1
+#endif
+
+typedef struct _WTSINFOEX_LEVEL1_W {
+    ULONG SessionId;
+    WTS_CONNECTSTATE_CLASS SessionState;
+    LONG SessionFlags;
+    WCHAR WinStationName[WINSTATIONNAME_LENGTH + 1];
+    WCHAR UserName[USERNAME_LENGTH + 1];
+    WCHAR DomainName[DOMAIN_LENGTH + 1];
+    LARGE_INTEGER LogonTime;
+    LARGE_INTEGER ConnectTime;
+    LARGE_INTEGER DisconnectTime;
+    LARGE_INTEGER LastInputTime;
+    LARGE_INTEGER CurrentTime;
+    DWORD IncomingBytes;
+    DWORD OutgoingBytes;
+    DWORD IncomingFrames;
+    DWORD OutgoingFrames;
+    DWORD IncomingCompressedBytes;
+    DWORD OutgoingCompressedBytes;
+} WTSINFOEX_LEVEL1_W, *PWTSINFOEX_LEVEL1_W;
+
+typedef union _WTSINFOEX_LEVEL_W {
+    WTSINFOEX_LEVEL1_W WTSInfoExLevel1;
+} WTSINFOEX_LEVEL_W, *PWTSINFOEX_LEVEL_W;
+
+typedef struct _WTSINFOEXW {
+    DWORD Level;
+    WTSINFOEX_LEVEL_W Data;
+} WTSINFOEXW, *PWTSINFOEXW;
+#endif
 
 extern "C" uint32_t get_session_user_info(PWSTR bufin, uint32_t nin, uint32_t id);
 
@@ -37,6 +85,10 @@ static BOOL GetProcessUserName(DWORD processID, LPWSTR outUserName, DWORD inUser
     PTOKEN_USER tokenUser = NULL;
     wchar_t *userName = NULL;
     wchar_t *domainName = NULL;
+    DWORD tokenInfoLength = 0;
+    DWORD userSize = 0;
+    DWORD domainSize = 0;
+    SID_NAME_USE snu = SidTypeUnknown;
 
     hProcess = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, processID);
     if (hProcess == NULL)
@@ -47,7 +99,6 @@ static BOOL GetProcessUserName(DWORD processID, LPWSTR outUserName, DWORD inUser
     {
         goto cleanup;
     }
-    DWORD tokenInfoLength = 0;
     GetTokenInformation(hToken, TokenUser, NULL, 0, &tokenInfoLength);
     if (tokenInfoLength == 0)
     {
@@ -62,9 +113,6 @@ static BOOL GetProcessUserName(DWORD processID, LPWSTR outUserName, DWORD inUser
     {
         goto cleanup;
     }
-    DWORD userSize = 0;
-    DWORD domainSize = 0;
-    SID_NAME_USE snu;
     LookupAccountSidW(NULL, tokenUser->User.Sid, NULL, &userSize, NULL, &domainSize, &snu);
     if (userSize == 0 || domainSize == 0)
     {
@@ -614,7 +662,7 @@ extern "C"
         {
             if (buf)
             {
-                nout = min(nin, n);
+                nout = std::min<uint32_t>(nin, static_cast<uint32_t>(n));
                 memcpy(bufin, buf, nout);
                 WTSFreeMemory(buf);
             }
@@ -631,7 +679,7 @@ extern "C"
         {
             if (buf)
             {
-                nout = min(nin, n);
+                nout = std::min<uint32_t>(nin, static_cast<uint32_t>(n));
                 memcpy(bufin, buf, nout);
                 WTSFreeMemory(buf);
             }

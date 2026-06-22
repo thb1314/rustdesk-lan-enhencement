@@ -78,13 +78,14 @@ fn setup(
         }
     };
 
+    #[cfg(windows)]
+    if _args.is_empty() {
+        *_ui = true;
+        ui::setup();
+    }
+
     let mut ts = 0;
     if clear || !is_timestamp_matches(&dir, &mut ts) {
-        #[cfg(windows)]
-        if _args.is_empty() {
-            *_ui = true;
-            ui::setup();
-        }
         std::fs::remove_dir_all(&dir).ok();
     }
     for file in reader.files.iter() {

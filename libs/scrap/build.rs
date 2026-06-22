@@ -26,6 +26,7 @@ fn link_pkg_config(_name: &str) -> Vec<PathBuf> {
 /// Link vcpkg package.
 fn link_vcpkg(mut path: PathBuf, name: &str) -> PathBuf {
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap();
+    let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
     let mut target_arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap();
     if target_arch == "x86_64" {
         target_arch = "x64".to_owned();
@@ -47,7 +48,11 @@ fn link_vcpkg(mut path: PathBuf, name: &str) -> PathBuf {
             format!("{}-{}", target_arch, target_os)
         }
     } else if target_os == "windows" {
-        format!("{}-windows-static", target_arch)
+        if target_env == "gnu" {
+            format!("{}-mingw-static", target_arch)
+        } else {
+            format!("{}-windows-static", target_arch)
+        }
     } else {
         format!("{}-{}", target_arch, target_os)
     };
@@ -254,14 +259,24 @@ fn main() {
         // nothing
     } else if target_os == "android" {
         println!("cargo:rustc-cfg=android");
-    } else if cfg!(windows) {
+    } else if target_os == "windows" {
+        println!("cargo:rustc-link-lib=windowscodecs");
+        let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+        if target_env == "msvc" {
+            let mingw_lib = Path::new("/usr/x86_64-w64-mingw32/lib");
+            if mingw_lib.exists() {
+                println!("cargo:rustc-link-search={}", mingw_lib.display());
+                println!("cargo:rustc-link-lib=static=winpthread");
+                println!("cargo:rustc-link-lib=static=pthread");
+            }
+        }
         // The first choice is Windows because DXGI is amazing.
         println!("cargo:rustc-cfg=dxgi");
-    } else if cfg!(target_os = "macos") {
+    } else if target_os == "macos" {
         // Quartz is second because macOS is the (annoying) exception.
         println!("cargo:rustc-cfg=quartz");
-    } else if cfg!(unix) {
-        // On UNIX we pray that X11 (with XCB) is available.
+    } else if target_os == "linux" {
+        // On Linux we pray that X11 (with XCB) is available.
         println!("cargo:rustc-cfg=x11");
     }
 }

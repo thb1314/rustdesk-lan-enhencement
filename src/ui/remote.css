@@ -19,6 +19,14 @@ div#quality-monitor {
     border: 0.5px solid azure;
 }
 
+div#quality-monitor div.connection-info {
+    color: #fff;
+    font-weight: bold;
+    padding-bottom: 4px;
+    margin-bottom: 4px;
+    border-bottom: 0.5px solid rgba(255,255,255,0.45);
+}
+
 video#handler {
     behavior: native-remote video;
     size: *;

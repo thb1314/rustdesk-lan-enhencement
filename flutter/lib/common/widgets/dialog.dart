@@ -1905,6 +1905,75 @@ customImageQualityDialog(SessionID sessionId, String id, FFI ffi) async {
   msgBoxCommon(ffi.dialogManager, 'Custom Image Quality', content, [btnClose]);
 }
 
+imageSharpeningDialog(SessionID sessionId, FFI ffi) async {
+  double initValue = kDefaultImageSharpening;
+  final option = await bind.sessionGetOption(
+      sessionId: sessionId, arg: kOptionImageSharpening);
+  initValue = double.tryParse(option ?? '') ?? kDefaultImageSharpening;
+  if (initValue < kMinImageSharpening || initValue > kMaxImageSharpening) {
+    initValue = kDefaultImageSharpening;
+  }
+
+  final currentValue = SimpleWrapper(initValue.toInt());
+
+  Future<void> saveValue() async {
+    await bind.sessionPeerOption(
+        sessionId: sessionId,
+        name: kOptionImageSharpening,
+        value: currentValue.value.toString());
+  }
+
+  final btnClose = dialogButton('Close', onPressed: () async {
+    await saveValue();
+    ffi.dialogManager.dismissAll();
+  });
+
+  Widget content = StatefulBuilder(builder: (context, setState) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(translate('Image sharpening')).paddingOnly(bottom: 12),
+        Row(
+          children: [
+            Expanded(
+              child: Slider(
+                value: currentValue.value.toDouble(),
+                min: kMinImageSharpening,
+                max: kMaxImageSharpening,
+                divisions:
+                    (kMaxImageSharpening - kMinImageSharpening).toInt(),
+                label: currentValue.value.toString(),
+                onChanged: (value) {
+                  setState(() {
+                    currentValue.value = value.round();
+                  });
+                },
+                onChangeEnd: (value) async {
+                  currentValue.value = value.round();
+                  await saveValue();
+                },
+              ),
+            ),
+            SizedBox(
+              width: 40,
+              child: Text(
+                currentValue.value.toString(),
+                textAlign: TextAlign.right,
+              ),
+            ),
+          ],
+        ),
+        Text(translate('Image sharpening tip'),
+                style: TextStyle(fontSize: 12, color: Colors.grey))
+            .paddingOnly(top: 4),
+      ],
+    );
+  });
+
+  msgBoxCommon(ffi.dialogManager, 'Image sharpening', content, [btnClose]);
+}
+
 trackpadSpeedDialog(SessionID sessionId, FFI ffi) async {
   int initSpeed = ffi.inputModel.trackpadSpeed;
   final curSpeed = SimpleWrapper(initSpeed);

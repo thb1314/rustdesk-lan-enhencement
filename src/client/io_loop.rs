@@ -177,14 +177,14 @@ impl<T: InvokeUiSession> Remote<T> {
         )
         .await
         {
-            Ok(((mut peer, direct, pk, kcp, stream_type), (feedback, rendezvous_server))) => {
+            Ok(((mut peer, direct, pk, kcp, stream_type, endpoint), (feedback, rendezvous_server))) => {
                 self.handler
                     .connection_round_state
                     .lock()
                     .unwrap()
                     .set_connected();
                 self.handler
-                    .set_connection_type(peer.is_secured(), direct, stream_type); // flutter -> connection_ready
+                    .set_connection_type(peer.is_secured(), direct, stream_type, &endpoint); // flutter -> connection_ready
                 self.handler.update_direct(Some(direct));
                 if conn_type == ConnType::DEFAULT_CONN || conn_type == ConnType::VIEW_CAMERA {
                     self.handler

@@ -922,10 +922,6 @@ async fn send_close_async(postfix: &str) -> ResultType<()> {
 // https://docs.microsoft.com/en-us/windows/win32/api/sas/nf-sas-sendsas
 // https://www.cnblogs.com/doutu/p/4892726.html
 pub fn send_sas() {
-    #[link(name = "sas")]
-    extern "system" {
-        pub fn SendSAS(AsUser: BOOL);
-    }
     unsafe {
         log::info!("SAS received");
 
@@ -972,7 +968,33 @@ pub fn send_sas() {
         }
 
         // Send SAS
-        SendSAS(FALSE);
+        let sas_module = match CString::new("sas.dll") {
+            Ok(name) => LoadLibraryA(name.as_ptr()),
+            Err(err) => {
+                log::error!("Failed to prepare sas.dll name: {}", err);
+                return;
+            }
+        };
+        if sas_module.is_null() {
+            log::error!("LoadLibraryA(sas.dll) failed: {}", io::Error::last_os_error());
+            return;
+        }
+
+        let send_sas_name = match CString::new("SendSAS") {
+            Ok(name) => name,
+            Err(err) => {
+                log::error!("Failed to prepare SendSAS symbol: {}", err);
+                return;
+            }
+        };
+        let send_sas = GetProcAddress(sas_module, send_sas_name.as_ptr());
+        if send_sas.is_null() {
+            log::error!("GetProcAddress(SendSAS) failed: {}", io::Error::last_os_error());
+            return;
+        }
+
+        let send_sas: extern "system" fn(BOOL) = std::mem::transmute(send_sas);
+        send_sas(FALSE);
 
         // Restore original value if we changed it
         if let Some(original) = original_value {

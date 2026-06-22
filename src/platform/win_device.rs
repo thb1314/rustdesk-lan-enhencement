@@ -25,7 +25,7 @@ use winapi::{
     },
 };
 
-#[link(name = "Newdev")]
+#[link(name = "newdev")]
 extern "system" {
     fn UpdateDriverForPlugAndPlayDevicesW(
         hwnd_parent: HWND,

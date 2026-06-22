@@ -188,6 +188,56 @@ pub fn get_key_state(key: enigo::Key) -> bool {
 
 impl Client {
     const CLIENT_CLIPBOARD_NAME: &'static str = "client-clipboard";
+    // Server maps this custom quality value to about 20.0x bitrate; Best is 1.5x.
+    // That keeps the LAN path well above the built-in "Best" ceiling.
+    const LAN_ULTRA_IMAGE_QUALITY: i32 = 1000;
+    const LAN_RECOMMENDED_IMAGE_SHARPENING: i32 = 20;
+    const OPTION_LAN_QUALITY_OPTIMIZATION: &'static str = "lan-quality-optimization";
+    const OPTION_IMAGE_SHARPENING: &'static str = "image-sharpening";
+    const DEFAULT_IMAGE_SHARPENING: i32 = 0;
+    const MAX_IMAGE_SHARPENING: i32 = 100;
+
+    fn is_lan_addr(ip: std::net::IpAddr) -> bool {
+        match ip {
+            std::net::IpAddr::V4(ip) => {
+                let octets = ip.octets();
+                ip.is_private()
+                    || (octets[0] == 100 && (64..128).contains(&octets[1]))
+                    || ip.is_loopback()
+                    || ip.is_link_local()
+            }
+            std::net::IpAddr::V6(ip) => {
+                let segments = ip.segments();
+                ip.is_loopback()
+                    || (segments[0] & 0xfe00) == 0xfc00
+                    || (segments[0] & 0xffc0) == 0xfe80
+            }
+        }
+    }
+
+    fn is_lan_ip(peer: &str) -> bool {
+        if let Ok(ip) = peer.parse::<std::net::IpAddr>() {
+            return Self::is_lan_addr(ip);
+        }
+        if let Ok(addr) = peer.parse::<SocketAddr>() {
+            return Self::is_lan_addr(addr.ip());
+        }
+        false
+    }
+
+    fn normalize_image_sharpening(value: i32) -> i32 {
+        value.clamp(
+            Self::DEFAULT_IMAGE_SHARPENING,
+            Self::MAX_IMAGE_SHARPENING,
+        )
+    }
+
+    fn parse_image_sharpening(value: &str) -> Option<i32> {
+        value
+            .parse::<i32>()
+            .ok()
+            .map(Self::normalize_image_sharpening)
+    }
 
     /// Start a new connection.
     pub async fn start(
@@ -203,12 +253,14 @@ impl Client {
             Option<Vec<u8>>,
             Option<KcpStream>,
             &'static str,
+            String,
         ),
         (i32, String),
     )> {
         debug_assert!(peer == interface.get_id());
         interface.update_direct(None);
         interface.update_received(false);
+        interface.update_lan_quality_hint(false);
         match Self::_start(peer, key, token, conn_type, interface.clone()).await {
             Err(err) => {
                 let err_str = err.to_string();
@@ -248,6 +300,7 @@ impl Client {
             Option<Vec<u8>>,
             Option<KcpStream>,
             &'static str,
+            String,
         ),
         (i32, String),
         bool,
@@ -257,15 +310,13 @@ impl Client {
         }
         // to-do: remember the port for each peer, so that we can retry easier
         if hbb_common::is_ip_str(peer) {
+            let endpoint = check_port(peer, RELAY_PORT + 1);
+            let conn = connect_tcp_local(endpoint.clone(), None, CONNECT_TIMEOUT).await?;
+            if Self::is_lan_ip(peer) {
+                interface.update_lan_quality_hint(true);
+            }
             return Ok((
-                (
-                    connect_tcp_local(check_port(peer, RELAY_PORT + 1), None, CONNECT_TIMEOUT)
-                        .await?,
-                    true,
-                    None,
-                    None,
-                    "TCP",
-                ),
+                (conn, true, None, None, "TCP", endpoint),
                 (0, "".to_owned()),
                 false,
             ));
@@ -279,6 +330,7 @@ impl Client {
                     None,
                     None,
                     "TCP",
+                    peer.to_owned(),
                 ),
                 (0, "".to_owned()),
                 false,
@@ -386,6 +438,7 @@ impl Client {
             Option<Vec<u8>>,
             Option<KcpStream>,
             &'static str,
+            String,
         ),
         (i32, String),
         bool,
@@ -551,6 +604,17 @@ impl Client {
                             }
                         }
                         signed_id_pk = rr.pk().into();
+                        let relay_endpoint = rr.relay_server.clone();
+                        let ipv6_endpoint = if !rr.socket_addr_v6.is_empty() {
+                            let addr = AddrMangle::decode(&rr.socket_addr_v6);
+                            if addr.port() > 0 {
+                                addr.to_string()
+                            } else {
+                                "".to_owned()
+                            }
+                        } else {
+                            "".to_owned()
+                        };
                         let fut = Self::create_relay(
                             &peer,
                             rr.uuid,
@@ -573,12 +637,17 @@ impl Client {
                             Err(e) => (Err(e), None, ""),
                         };
                         let mut conn = conn?;
+                        let endpoint = if typ == "IPv6" && !ipv6_endpoint.is_empty() {
+                            ipv6_endpoint
+                        } else {
+                            relay_endpoint
+                        };
                         feedback = rr.feedback;
                         log::info!("{:?} used to establish {typ} connection", start.elapsed());
                         let pk =
                             Self::secure_connection(&peer, signed_id_pk, &key, &mut conn).await?;
                         return Ok((
-                            (conn, typ == "IPv6", pk, kcp, typ),
+                            (conn, typ == "IPv6", pk, kcp, typ, endpoint),
                             (feedback, rendezvous_server),
                             false,
                         ));
@@ -656,6 +725,7 @@ impl Client {
         Option<Vec<u8>>,
         Option<KcpStream>,
         &'static str,
+        String,
     )> {
         let direct_failures = interface.get_lch().read().unwrap().direct_failures;
         let mut connect_timeout = 0;
@@ -714,6 +784,7 @@ impl Client {
         };
 
         let mut direct = !conn.is_err();
+        let mut endpoint = peer.to_string();
         if interface.is_force_relay() || conn.is_err() {
             if !relay_server.is_empty() {
                 conn = Self::request_relay(
@@ -733,11 +804,15 @@ impl Client {
                 }
                 typ = "Relay";
                 direct = false;
+                endpoint = relay_server.to_owned();
             } else {
                 bail!("Failed to make direct connection to remote desktop");
             }
         }
         let mut conn = conn?;
+        if direct && is_local {
+            interface.update_lan_quality_hint(true);
+        }
         log::info!(
             "{:?} used to establish {typ} connection with {} punch",
             start.elapsed(),
@@ -753,7 +828,7 @@ impl Client {
             }
         };
         log::debug!("{} punch secure_connection ok", punch_type);
-        Ok((conn, direct, pk, kcp, typ))
+        Ok((conn, direct, pk, kcp, typ, endpoint))
     }
 
     /// Establish secure connection with the server.
@@ -1543,6 +1618,7 @@ pub struct VideoHandler {
     decoder: Decoder,
     pub rgb: ImageRgb,
     pub texture: ImageTexture,
+    sharpen_buffer: Vec<u8>,
     recorder: Arc<Mutex<Option<Recorder>>>,
     record: bool,
     _display: usize, // useful for debug
@@ -1575,6 +1651,7 @@ impl VideoHandler {
             decoder: Decoder::new(format, luid),
             rgb: ImageRgb::new(rgba_format, crate::get_dst_align_rgba()),
             texture: Default::default(),
+            sharpen_buffer: Vec::new(),
             recorder: Default::default(),
             record: false,
             _display,
@@ -1749,6 +1826,7 @@ pub struct LoginConfigHandler {
     pub force_relay: bool,
     pub direct: Option<bool>,
     pub received: bool,
+    pub prefer_lan_quality: bool,
     switch_uuid: Option<String>,
     #[cfg(feature = "flutter")]
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -1869,6 +1947,7 @@ impl LoginConfigHandler {
 
         self.direct = None;
         self.received = false;
+        self.prefer_lan_quality = false;
         #[cfg(feature = "flutter")]
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {
@@ -1941,10 +2020,38 @@ impl LoginConfigHandler {
     /// * `v` - value of option
     pub fn set_option(&mut self, k: String, v: String) {
         let mut config = self.load_config();
-        if v == self.get_option(&k) {
+        let current = config.options.get(&k).cloned().unwrap_or_default();
+        if v == current {
             return;
         }
         config.options.insert(k, v);
+        self.save_config(config);
+    }
+
+    fn is_lan_quality_optimization_enabled(&self) -> bool {
+        self.prefer_lan_quality
+            && self
+                .config
+                .options
+                .get(Client::OPTION_LAN_QUALITY_OPTIMIZATION)
+                .map(|v| v != "N")
+                .unwrap_or(true)
+    }
+
+    pub fn is_lan_quality_optimization_available(&self) -> bool {
+        self.prefer_lan_quality
+    }
+
+    pub fn get_lan_quality_optimization(&self) -> bool {
+        self.is_lan_quality_optimization_enabled()
+    }
+
+    pub fn set_lan_quality_optimization(&mut self, enabled: bool) {
+        let mut config = self.load_config();
+        config.options.insert(
+            Client::OPTION_LAN_QUALITY_OPTIMIZATION.to_owned(),
+            if enabled { "Y" } else { "N" }.to_owned(),
+        );
         self.save_config(config);
     }
 
@@ -2248,8 +2355,10 @@ impl LoginConfigHandler {
                 return None;
             }
         }
-        let q = self.image_quality.clone();
-        if let Some(q) = self.get_image_quality_enum(&q, ignore_default) {
+        let q = self.image_quality.as_str();
+        if self.is_lan_quality_optimization_enabled() && (q.is_empty() || q == "balanced" || q == "best") {
+            msg.custom_image_quality = Client::LAN_ULTRA_IMAGE_QUALITY << 8;
+        } else if let Some(q) = self.get_image_quality_enum(&q, ignore_default) {
             msg.image_quality = q.into();
         } else if q == "custom" {
             let config = self.load_config();
@@ -2307,12 +2416,29 @@ impl LoginConfigHandler {
     }
 
     pub fn get_supported_decoding(&self) -> SupportedDecoding {
-        Decoder::supported_decodings(
+        let mut decoding = Decoder::supported_decodings(
             Some(&self.id),
             use_texture_render(),
             self.adapter_luid,
             &self.mark_unsupported,
-        )
+        );
+        if self.is_lan_quality_optimization_enabled() {
+            if decoding
+                .prefer
+                .enum_value_or(supported_decoding::PreferCodec::Auto)
+                == supported_decoding::PreferCodec::Auto
+            {
+                if decoding.ability_av1 > 0
+                    && Config::get_option(hbb_common::config::keys::OPTION_AV1_TEST) == "Y"
+                {
+                    decoding.prefer = supported_decoding::PreferCodec::AV1.into();
+                } else if decoding.ability_vp9 > 0 {
+                    decoding.prefer = supported_decoding::PreferCodec::VP9.into();
+                }
+            }
+            decoding.prefer_chroma = Chroma::I444.into();
+        }
+        decoding
     }
 
     /// Parse the image quality option.
@@ -2433,7 +2559,16 @@ impl LoginConfigHandler {
     /// * `value` - The image quality.
     pub fn save_image_quality(&mut self, value: String) -> Option<Message> {
         let mut res = None;
-        if let Some(q) = self.get_image_quality_enum(&value, false) {
+        if self.is_lan_quality_optimization_enabled() && (value.is_empty() || value == "balanced" || value == "best") {
+            let mut misc = Misc::new();
+            misc.set_option(OptionMessage {
+                custom_image_quality: Client::LAN_ULTRA_IMAGE_QUALITY << 8,
+                ..Default::default()
+            });
+            let mut msg_out = Message::new();
+            msg_out.set_misc(misc);
+            res = Some(msg_out);
+        } else if let Some(q) = self.get_image_quality_enum(&value, false) {
             let mut misc = Misc::new();
             misc.set_option(OptionMessage {
                 image_quality: q.into(),
@@ -2485,6 +2620,24 @@ impl LoginConfigHandler {
             v.clone()
         } else {
             "".to_owned()
+        }
+    }
+
+    pub fn get_image_sharpening(&self) -> i32 {
+        let stored = self
+            .config
+            .options
+            .get(Client::OPTION_IMAGE_SHARPENING)
+            .map(|v| v.as_str())
+            .unwrap_or("");
+        if stored.is_empty() {
+            if self.is_lan_quality_optimization_enabled() {
+                Client::LAN_RECOMMENDED_IMAGE_SHARPENING
+            } else {
+                Client::DEFAULT_IMAGE_SHARPENING
+            }
+        } else {
+            Client::parse_image_sharpening(stored).unwrap_or(Client::DEFAULT_IMAGE_SHARPENING)
         }
     }
 
@@ -2760,12 +2913,7 @@ impl LoginConfigHandler {
     }
 
     pub fn update_supported_decodings(&self) -> Message {
-        let decoding = scrap::codec::Decoder::supported_decodings(
-            Some(&self.id),
-            use_texture_render(),
-            self.adapter_luid,
-            &self.mark_unsupported,
-        );
+        let decoding = self.get_supported_decoding();
         let mut misc = Misc::new();
         misc.set_option(OptionMessage {
             supported_decoding: hbb_common::protobuf::MessageField::some(decoding),
@@ -2829,6 +2977,71 @@ impl LoginConfigHandler {
             "terminal-admin-service-id"
         } else {
             "terminal-service-id"
+        }
+    }
+}
+
+#[inline]
+fn rgba_bytes_per_row(rgb: &ImageRgb) -> usize {
+    let bytes_per_pixel = match rgb.fmt() {
+        ImageFormat::Raw => 3,
+        ImageFormat::ARGB | ImageFormat::ABGR => 4,
+    };
+    (rgb.w * bytes_per_pixel + rgb.align() - 1) & !(rgb.align() - 1)
+}
+
+fn apply_image_sharpening(rgb: &mut ImageRgb, scratch: &mut Vec<u8>, strength: i32) {
+    if rgb.w < 3 || rgb.h < 3 {
+        return;
+    }
+    if !matches!(rgb.fmt(), ImageFormat::ARGB | ImageFormat::ABGR) {
+        return;
+    }
+    let strength = Client::normalize_image_sharpening(strength);
+    if strength <= 0 {
+        return;
+    }
+
+    let stride = rgba_bytes_per_row(rgb);
+    let width = rgb.w;
+    let height = rgb.h;
+    scratch.clear();
+    scratch.extend_from_slice(&rgb.raw);
+    let src = scratch.as_slice();
+    let dst = &mut rgb.raw;
+
+    const CHANNELS: usize = 4;
+    const THRESHOLD: i32 = 8;
+    let amount_numerator = strength;
+    let amount_denominator = 100;
+
+    for y in 1..height - 1 {
+        let row = y * stride;
+        let prev = (y - 1) * stride;
+        let next = (y + 1) * stride;
+        for x in 1..width - 1 {
+            let px = row + x * CHANNELS;
+            let left = px - CHANNELS;
+            let right = px + CHANNELS;
+            let up = prev + x * CHANNELS;
+            let down = next + x * CHANNELS;
+
+            for channel in 0..3 {
+                let center = src[px + channel] as i32;
+                let delta = center * 4
+                    - src[left + channel] as i32
+                    - src[right + channel] as i32
+                    - src[up + channel] as i32
+                    - src[down + channel] as i32;
+
+                if delta.abs() < THRESHOLD {
+                    continue;
+                }
+
+                let sharpened =
+                    center + (delta * amount_numerator + amount_denominator / 2) / amount_denominator;
+                dst[px + channel] = sharpened.clamp(0, 255) as u8;
+            }
         }
     }
 }
@@ -2918,6 +3131,15 @@ pub fn start_video_thread<F, T>(
                             let format_changed = handler.decoder.format() != format;
                             match handler.handle_frame(vf, &mut pixelbuffer, &mut tmp_chroma) {
                                 Ok(true) => {
+                                    let sharpening =
+                                        session.lc.read().unwrap().get_image_sharpening();
+                                    if pixelbuffer && sharpening > 0 {
+                                        apply_image_sharpening(
+                                            &mut handler.rgb,
+                                            &mut handler.sharpen_buffer,
+                                            sharpening,
+                                        );
+                                    }
                                     video_callback(
                                         display,
                                         &mut handler.rgb,
@@ -3744,6 +3966,10 @@ pub trait Interface: Send + Clone + 'static + Sized {
         self.get_lch().write().unwrap().received = received;
     }
 
+    fn update_lan_quality_hint(&self, prefer: bool) {
+        self.get_lch().write().unwrap().prefer_lan_quality = prefer;
+    }
+
     fn on_establish_connection_error(&self, err: String) {
         let title = "Connection Error";
         let text = err.to_string();
@@ -4158,7 +4384,156 @@ pub mod peer_online {
 
     #[cfg(test)]
     mod tests {
+        use super::super::*;
         use hbb_common::tokio;
+        use hbb_common::protobuf::Enum;
+
+        #[test]
+        fn test_lan_ip_detection() {
+            assert!(Client::is_lan_ip("127.0.0.1"));
+            assert!(Client::is_lan_ip("192.168.1.10"));
+            assert!(Client::is_lan_ip("100.64.12.34"));
+            assert!(Client::is_lan_ip("100.64.12.34:21118"));
+            assert!(Client::is_lan_ip("169.254.1.2"));
+            assert!(Client::is_lan_ip("[fc00::1]:21118"));
+            assert!(!Client::is_lan_ip("8.8.8.8"));
+            assert!(!Client::is_lan_ip("2001:4860:4860::8888"));
+            assert!(!Client::is_lan_ip("example.com"));
+        }
+
+        #[test]
+        fn test_lan_quality_promotes_best_to_custom() {
+            let mut base = LoginConfigHandler::default();
+            base.id = "lan-quality-test".to_owned();
+            base.config.image_quality = "best".to_owned();
+
+            let default_option = base.get_option_message(false).unwrap();
+            assert_eq!(default_option.custom_image_quality, 0);
+            assert_eq!(
+                default_option.image_quality.value(),
+                ImageQuality::Best.value()
+            );
+
+            let mut lan = LoginConfigHandler::default();
+            lan.id = "lan-quality-test".to_owned();
+            lan.config.image_quality = "best".to_owned();
+            lan.prefer_lan_quality = true;
+
+            let lan_option = lan.get_option_message(false).unwrap();
+            assert_eq!(
+                lan_option.custom_image_quality,
+                Client::LAN_ULTRA_IMAGE_QUALITY << 8
+            );
+            assert_eq!(
+                lan_option.image_quality.value(),
+                ImageQuality::NotSet.value()
+            );
+        }
+
+        #[test]
+        fn test_lan_quality_can_be_disabled_to_original_best() {
+            let mut lan = LoginConfigHandler::default();
+            lan.id = "lan-quality-disabled-test".to_owned();
+            lan.config.image_quality = "best".to_owned();
+            lan.prefer_lan_quality = true;
+            lan.config.options.insert(
+                Client::OPTION_LAN_QUALITY_OPTIMIZATION.to_owned(),
+                "N".to_owned(),
+            );
+
+            let option = lan.get_option_message(false).unwrap();
+            assert_eq!(option.custom_image_quality, 0);
+            assert_eq!(option.image_quality.value(), ImageQuality::Best.value());
+            assert_ne!(
+                lan.get_supported_decoding().prefer_chroma.value(),
+                Chroma::I444.value()
+            );
+            assert_eq!(lan.get_image_sharpening(), Client::DEFAULT_IMAGE_SHARPENING);
+        }
+
+        #[test]
+        fn test_lan_quality_prefers_true_color_chroma() {
+            let base = LoginConfigHandler::default();
+            assert_ne!(
+                base.get_supported_decoding().prefer_chroma.value(),
+                Chroma::I444.value()
+            );
+
+            let mut lan = LoginConfigHandler::default();
+            lan.prefer_lan_quality = true;
+            assert_eq!(
+                lan.get_supported_decoding().prefer_chroma.value(),
+                Chroma::I444.value()
+            );
+        }
+
+        #[test]
+        fn test_image_sharpening_preserves_alpha_and_edges() {
+            let mut rgb = ImageRgb::new(ImageFormat::ABGR, 64);
+            rgb.w = 3;
+            rgb.h = 3;
+            let stride = rgba_bytes_per_row(&rgb);
+            rgb.raw.resize(rgb.h * stride, 0);
+
+            for y in 0..rgb.h {
+                for x in 0..rgb.w {
+                    let i = y * stride + x * 4;
+                    rgb.raw[i] = 100;
+                    rgb.raw[i + 1] = 100;
+                    rgb.raw[i + 2] = 100;
+                    rgb.raw[i + 3] = 77;
+                }
+            }
+
+            let center = stride + 4;
+            rgb.raw[center] = 140;
+            rgb.raw[center + 1] = 140;
+            rgb.raw[center + 2] = 140;
+
+            let original_corner = rgb.raw[0..4].to_vec();
+            let mut scratch = Vec::new();
+            apply_image_sharpening(&mut rgb, &mut scratch, 100);
+
+            assert!(rgb.raw[center] > 140);
+            assert!(rgb.raw[center + 1] > 140);
+            assert!(rgb.raw[center + 2] > 140);
+            assert_eq!(rgb.raw[center + 3], 77);
+            assert_eq!(&rgb.raw[0..4], original_corner.as_slice());
+        }
+
+        #[test]
+        fn test_image_sharpening_zero_strength_is_noop() {
+            let mut rgb = ImageRgb::new(ImageFormat::ABGR, 64);
+            rgb.w = 3;
+            rgb.h = 3;
+            let stride = rgba_bytes_per_row(&rgb);
+            rgb.raw.resize(rgb.h * stride, 90);
+            let before = rgb.raw.clone();
+            let mut scratch = Vec::new();
+            apply_image_sharpening(&mut rgb, &mut scratch, 0);
+            assert_eq!(rgb.raw, before);
+        }
+
+        #[test]
+        fn test_lan_runtime_sharpening_uses_recommended_default() {
+            let mut lan = LoginConfigHandler::default();
+            lan.prefer_lan_quality = true;
+            assert_eq!(
+                lan.get_image_sharpening(),
+                Client::LAN_RECOMMENDED_IMAGE_SHARPENING
+            );
+        }
+
+        #[test]
+        fn test_lan_runtime_sharpening_preserves_explicit_value() {
+            let mut lan = LoginConfigHandler::default();
+            lan.prefer_lan_quality = true;
+            lan.config.options.insert(
+                Client::OPTION_IMAGE_SHARPENING.to_owned(),
+                "35".to_owned(),
+            );
+            assert_eq!(lan.get_image_sharpening(), 35);
+        }
 
         #[tokio::test]
         async fn test_query_onlines() {

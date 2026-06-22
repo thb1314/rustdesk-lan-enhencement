@@ -342,6 +342,14 @@ menu div.separator {
   border: none;
 }
 
+menu div.connection-info {
+  color: color(light-text);
+  font-size: 11px;
+  padding: 4px 10px;
+  max-width: 260px;
+  @ELLIPSIS;
+}
+
 menu li {
   color: color(text);
   position: relative;
@@ -351,7 +359,8 @@ menu li span {
   display: none;
 }
 
-menu li.selected span:nth-child(1) {
+menu li.selected span:nth-child(1),
+menu li.selected span:first-child {
   display: inline-block;
   position: absolute;
   left: -10px;

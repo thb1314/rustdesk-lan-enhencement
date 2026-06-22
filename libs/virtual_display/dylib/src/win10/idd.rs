@@ -187,18 +187,14 @@ pub struct HSWDEVICE__ {
 pub type HSWDEVICE = *mut HSWDEVICE__;
 pub type PHSWDEVICE = *mut HSWDEVICE;
 
-#[link(name = "Newdev")]
 extern "C" {
     pub fn InstallUpdate(fullInfPath: LPCTSTR, rebootRequired: PBOOL) -> BOOL;
 }
 
-#[link(name = "Setupapi")]
 extern "C" {
     pub fn IsDeviceCreated(created: PBOOL) -> BOOL;
 }
 
-#[link(name = "Swdevice")]
-#[link(name = "OneCoreUAP")]
 extern "C" {
     pub fn DeviceCreate(hSwDevice: PHSWDEVICE) -> BOOL;
     pub fn DeviceClose(hSwDevice: HSWDEVICE);

@@ -43,7 +43,31 @@ header .remote-id {
   width: 80px;
   @ELLIPSIS;
   padding-left: 30px;
-  padding-right: 4em;
+  padding-right: 0.4em;
+  margin: * 0;
+}
+
+header .connection-route {
+  width: 112px;
+  @ELLIPSIS;
+  color: color(light-text);
+  font-size: 11px;
+  margin: * 0;
+  text-align: left;
+  white-space: nowrap;
+}
+
+header .connection-route.relay {
+  color: #8a5a00;
+}
+
+header .connection-route.direct {
+  color: #1e6b3c;
+}
+
+header .connection-route.lan {
+  color: #095f9d;
+  font-weight: bold;
   margin: * 0;
 }
 
@@ -94,4 +118,3 @@ span#fullscreen.active {
 button:disabled {
   opacity: 0.3;
 }
-

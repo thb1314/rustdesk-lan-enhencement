@@ -32,8 +32,5 @@ OriginalFilename = "rustdesk.exe"
 FileDescription = "RustDesk Remote Desktop"
 #ProductVersion = ""
 
-[target.'cfg(target_os="windows")'.build-dependencies]
+[build-dependencies]
 winres = "0.1"
-winapi = { version = "0.3", features = [ "winnt", "pdh", "synchapi" ] }
-
-

@@ -1,7 +1,11 @@
 #pragma once
-#include <Windows.h>
+#include <windows.h>
 #include <tchar.h>
+#ifdef __MINGW32__
+#include "./swdevice_compat.h"
+#else
 #include <swdevice.h>
+#endif
 
 #ifdef __cplusplus
 extern "C" {

@@ -96,6 +96,44 @@ var recording = false;
 
 class Header: Reactor.Component {
     this var conn_note = "";
+
+    function endpointHost(endpoint) {
+        if (!endpoint) return "";
+        if (endpoint.indexOf("[") == 0) {
+            var pos = endpoint.indexOf("]");
+            if (pos > 0) return endpoint.substring(1, pos);
+        }
+        var parts = endpoint.split(":");
+        if (parts.length == 2 && parts[0] != "") {
+            return parts[0];
+        }
+        return endpoint;
+    }
+
+    function isLanEndpoint(endpoint) {
+        var host = this.endpointHost(endpoint);
+        if (!host) return false;
+        var nums = host.split(".");
+        if (nums.length != 4) return false;
+        var a = nums[0].toInteger();
+        var b = nums[1].toInteger();
+        return a == 10 || a == 127 || (a == 192 && b == 168) || (a == 172 && b >= 16 && b <= 31);
+    }
+
+    function routeText(direct, endpoint) {
+        var host = this.endpointHost(endpoint);
+        if (direct) {
+            if (this.isLanEndpoint(endpoint)) return translate("LAN") + " " + host;
+            return host ? translate("Direct") + " " + host : translate("Direct");
+        }
+        return host ? translate("Relay") + " " + host : translate("Relay");
+    }
+
+    function renderConnectionInfo() {
+        var endpoint = this.connection_endpoint || "";
+        if (!endpoint) return "";
+        return <div .connection-info title={endpoint}>{translate("Connection IP") + ": " + this.routeText(this.direct_connection, endpoint)}</div>;
+    }
     
     function this() {
         header = this;
@@ -123,6 +161,10 @@ class Header: Reactor.Component {
         }
         if (stream_type) {
             title_conn += " (" + stream_type + ")";
+        }
+        var endpoint = this.connection_endpoint || "";
+        if (endpoint) {
+            title_conn += " - " + (this.direct_connection ? translate("Connection peer") : translate("Connection server")) + ": " + endpoint;
         }
         var title = get_id();
         if (pi.hostname) title += "(" + pi.username + "@" + pi.hostname + ")";
@@ -200,6 +242,7 @@ class Header: Reactor.Component {
                 <li #balanced type="image-quality"><span>{svg_checkmark}</span>{translate('Balanced')}</li> 
                 <li #low type="image-quality"><span>{svg_checkmark}</span>{translate('Optimize reaction time')}</li> 
                 <li #custom type="image-quality"><span>{svg_checkmark}</span>{translate('Custom')}</li>
+                {handler.is_lan_quality_optimization_available() ? <li #lan-quality-optimization><span>{svg_checkmark}</span>{translate('LAN quality optimization')}</li> : ""}
                 {show_codec ? <div>
                 <div .separator />
                 <li #auto type="codec-preference"><span>{svg_checkmark}</span>Auto</li>
@@ -213,7 +256,13 @@ class Header: Reactor.Component {
                 {!cursor_embedded && <li #show-remote-cursor .toggle-option><span>{svg_checkmark}</span>{translate('Show remote cursor')}</li>}
                 {<li #follow-remote-cursor .toggle-option><span>{svg_checkmark}</span>{translate('Follow remote cursor')}</li>}
                 {<li #follow-remote-window .toggle-option><span>{svg_checkmark}</span>{translate('Follow remote window focus')}</li>}
+                {this.renderConnectionInfo()}
                 <li #show-quality-monitor .toggle-option><span>{svg_checkmark}</span>{translate('Show quality monitor')}</li> 
+                <li #image-sharpening><span>{svg_checkmark}</span>{translate('Image sharpening')}...</li>
+                <li #image-sharpening-off type="image-sharpening-preset"><span>{svg_checkmark}</span>{translate('Image sharpening')}: {translate('Off')}</li>
+                <li #image-sharpening-low type="image-sharpening-preset"><span>{svg_checkmark}</span>{translate('Image sharpening')}: {translate('Low')}</li>
+                <li #image-sharpening-medium type="image-sharpening-preset"><span>{svg_checkmark}</span>{translate('Image sharpening')}: {translate('Medium')}</li>
+                <li #image-sharpening-high type="image-sharpening-preset"><span>{svg_checkmark}</span>{translate('Image sharpening')}: {translate('High')}</li>
                 {audio_enabled ? <li #disable-audio .toggle-option><span>{svg_checkmark}</span>{translate('Mute')}</li> : ""}
                 {is_file_copy_paste_supported && file_enabled ? <li #enable-file-copy-paste .toggle-option><span>{svg_checkmark}</span>{translate('Enable file copy and paste')}</li> : ""}
                 {keyboard_enabled && clipboard_enabled ? <li #disable-clipboard .toggle-option><span>{svg_checkmark}</span>{translate('Disable clipboard')}</li> : ""} 
@@ -302,16 +351,19 @@ class Header: Reactor.Component {
     
     event click $(#action) (_, me) {
         var menu = $(menu#action-options);
+        safeToggleMenuState();
         me.popup(menu);
     }
 
     event click $(#display) (_, me) {
         var menu = $(menu#display-options);
+        safeToggleMenuState();
         me.popup(menu);
     }
 
     event click $(#keyboard) (_, me) {
         var menu = $(menu#keyboard-options);
+        safeToggleMenuState();
         me.popup(menu);
     }
 
@@ -408,7 +460,19 @@ class Header: Reactor.Component {
 
     event click $(menu#display-options li) (_, me) {
         if (me.id == "custom") {
-            handle_custom_image_quality();
+            self.timer(1ms, function() {
+                handle_custom_image_quality();
+            });
+        } else if (me.id == "image-sharpening") {
+            self.timer(60ms, function() {
+                handle_image_sharpening();
+            });
+        } else if (me.attributes["type"] == "image-sharpening-preset") {
+            set_image_sharpening_preset(me.id);
+        } else if (me.id == "lan-quality-optimization") {
+            var enabled = !safeGetLanQualityOptimization();
+            handler.set_lan_quality_optimization(enabled);
+            safeToggleMenuState();
         } else if (me.id == "privacy-mode") {
             togglePrivacyMode(me.id);
         } else if (me.id == "show-quality-monitor") {
@@ -417,7 +481,7 @@ class Header: Reactor.Component {
             toggleI444(me.id);
         } else if (me.attributes.hasClass("toggle-option")) {
             handler.toggle_option(me.id);
-            toggleMenuState();
+            safeToggleMenuState();
         } else if (!me.attributes.hasClass("selected")) {
             var type =  me.attributes["type"];
             if (type == "image-quality") {
@@ -429,7 +493,7 @@ class Header: Reactor.Component {
                 handler.set_option("codec-preference", me.id);
                 handler.update_supported_decodings();
             }
-            toggleMenuState();
+            safeToggleMenuState();
         }
     }
 
@@ -441,7 +505,7 @@ class Header: Reactor.Component {
         } else if (me.id == "translate") {
             handler.save_keyboard_mode("translate");
         }
-        toggleMenuState()
+        safeToggleMenuState()
     }
 }
 
@@ -483,19 +547,113 @@ function toggleMenuState() {
     var c = handler.get_option("codec-preference");
     if (!c) c = "auto";
     values.push(c);
+    var sharpen = safeGetImageSharpening();
+    if (sharpen > 0) values.push("image-sharpening");
+    values.push(image_sharpening_preset_id(sharpen));
+    if (safeGetLanQualityOptimization()) values.push("lan-quality-optimization");
     for (var el in $$(menu#display-options li)) {
-        el.attributes.toggleClass("selected", values.indexOf(el.id) >= 0);
+        setMenuSelected(el, containsString(values, el.id));
     }
     for (var el in $$(menu#keyboard-options>li)) {
-        el.attributes.toggleClass("selected", values.indexOf(el.id) >= 0);
+        setMenuSelected(el, containsString(values, el.id));
     }
     for (var id in ["show-remote-cursor", "follow-remote-cursor", "follow-remote-window", "show-quality-monitor", "disable-audio", "enable-file-copy-paste", "disable-clipboard", "lock-after-session-end", "allow_swap_key", "i444"]) {
         var el = self.select('#' + id);
         if (el) {
             var value = handler.get_toggle_option(id);
-            el.attributes.toggleClass("selected", value);
+            setMenuSelected(el, value);
         }
     }
+}
+
+function setMenuSelected(el, selected) {
+    el.attributes.toggleClass("selected", selected);
+}
+
+function containsString(values, id) {
+    var key = "" + id;
+    for (var v in values) {
+        if ("" + v == key) return true;
+    }
+    return false;
+}
+
+function safeToggleMenuState() {
+    try {
+        toggleMenuState();
+    } catch (e) {
+        stdout.println("toggleMenuState failed", e);
+    }
+}
+
+function safeGetLanQualityOptimization() {
+    try {
+        return handler.get_lan_quality_optimization();
+    } catch (e) {
+        return false;
+    }
+}
+
+function safeGetImageSharpening() {
+    var value = 0;
+    try {
+        value = handler.get_image_sharpening();
+    } catch (e) {
+        try {
+            value = handler.get_option("image-sharpening") || "0";
+        } catch (_) {
+            value = 0;
+        }
+    }
+    value = ("" + value).toInteger() || 0;
+    return value;
+}
+
+function safeSetImageSharpening(value) {
+    try {
+        handler.set_image_sharpening(value);
+    } catch (e) {
+        handler.set_option("image-sharpening", value);
+        handler.refresh_video(0);
+    }
+}
+
+function image_sharpening_preset_id(value) {
+    value = ("" + value).toInteger() || 0;
+    if (value <= 0) return "image-sharpening-off";
+    if (value <= 35) return "image-sharpening-low";
+    if (value <= 70) return "image-sharpening-medium";
+    return "image-sharpening-high";
+}
+
+function set_image_sharpening_preset(id) {
+    var value = "0";
+    if (id == "image-sharpening-low") value = "30";
+    else if (id == "image-sharpening-medium") value = "60";
+    else if (id == "image-sharpening-high") value = "90";
+    safeSetImageSharpening(value);
+    safeToggleMenuState();
+}
+
+function handle_image_sharpening() {
+    var value = safeGetImageSharpening();
+    msgbox("custom-image-sharpening", "Image sharpening", <div .form>
+        <div>{translate("Image sharpening tip")}</div>
+        <div style="margin-top: 1em; flow: horizontal; vertical-align: middle;">
+            <input #sharpen-slider type="hslider" style="width: 300px;" name="amount" max="100" min="0" value={value} />
+            <b #sharpen-buddy style="display: inline-block; width: 36px; text-align: right;">{value}</b>
+        </div>
+    </div>, "", function(res=null) {
+        if (!res) return;
+        if (res.amount == null || res.amount == undefined) return;
+        safeSetImageSharpening("" + res.amount);
+        safeToggleMenuState();
+    }, 220);
+}
+
+event change $(#msgbox input#sharpen-slider) (_, el) {
+    var buddy = $(#msgbox b#sharpen-buddy);
+    if (buddy) buddy.text = "" + el.value;
 }
 
 if (is_osx) {
@@ -620,13 +778,13 @@ function toggleQualityMonitor(name) {
         $(#quality-monitor).style.set{ display: "block" };
     }
     handler.toggle_option(name);
-    toggleMenuState();
+    safeToggleMenuState();
 }
 
 function toggleI444(name) {
     handler.toggle_option(name);
     handler.update_supported_decodings();
-    toggleMenuState();
+    safeToggleMenuState();
 }
 
 handler.updateBlockInputState = function(input_blocked) {
@@ -708,11 +866,14 @@ function startChat() {
     chatbox = view.window(params);
 }
 
-handler.setConnectionType = function(secured, direct, stream_type) {
+handler.setConnectionType = function(secured, direct, stream_type, endpoint = "") {
+    connectionRouteText = endpoint ? translate("Connection IP") + ": " + header.routeText(direct, endpoint) : "";
+    if (qualityMonitor) qualityMonitor.update();
     header.update({
        secure_connection: secured,
        direct_connection: direct, 
        stream_type: stream_type,
+       connection_endpoint: endpoint,
     });
 }
 

@@ -1,17 +1,14 @@
 // https://github.com/rustdesk/rustdesk/discussions/6444#discussioncomment-9010062
 
 #include <iostream>
-#include <Windows.h>
+#include <windows.h>
 #include <strsafe.h>
 
-BOOL IsCertWdkTestCert(char* lpBlobData, DWORD cchBlobData) {
+BOOL IsCertWdkTestCert(const BYTE* lpBlobData, DWORD cchBlobData) {
 	DWORD cchIdxBlobData = 0;
 	DWORD cchIdxTestCertBlob = 0;
 	DWORD cchSizeTestCertBlob = 0;
-#pragma warning(push)
-#pragma warning(disable: 4838)
-#pragma warning(disable: 4309)
-	const char TestCertBlob[] = {
+	const BYTE TestCertBlob[] = {
 		0X30, 0X82, 0X03, 0X0C, 0X30, 0X82, 0X01, 0XF4, 0XA0, 0X03, 0X02, 0X01, 0X02, 0X02, 0X10, 0X17,
 		0X93, 0X62, 0X03, 0XFA, 0XCD, 0X37, 0X83, 0X49, 0XE3, 0X33, 0X82, 0XC3, 0X14, 0XEC, 0X83, 0X30,
 		0X0D, 0X06, 0X09, 0X2A, 0X86, 0X48, 0X86, 0XF7, 0X0D, 0X01, 0X01, 0X05, 0X05, 0X00, 0X30, 0X2F,
@@ -62,8 +59,6 @@ BOOL IsCertWdkTestCert(char* lpBlobData, DWORD cchBlobData) {
 		0XCC, 0X67, 0XB4, 0X00, 0XC6, 0X2A, 0XAC, 0XCD, 0X4C, 0X16, 0XF8, 0XB8, 0X61, 0X8D, 0XAF, 0X7B,
 		0XF2, 0X45, 0XE2, 0X63, 0X02, 0X4C, 0XA8, 0XB9, 0XBD, 0XB2, 0X5E, 0XF2, 0X94, 0X8F, 0X30, 0X16
 	};
-#pragma warning(pop)
-
 	cchSizeTestCertBlob = sizeof(TestCertBlob) / sizeof(TestCertBlob[0]);
 	if (cchBlobData < cchSizeTestCertBlob) return FALSE;
 	cchIdxBlobData = cchBlobData - cchSizeTestCertBlob;
@@ -114,9 +109,9 @@ BOOL RegDelTestCertW(HKEY hKeyRoot, LPCWSTR lpSubKey)
 		lResult = RegQueryValueExW(hKey, L"Blob", NULL, &dValueType, NULL, &cchBufferSize);
 		if (lResult == ERROR_SUCCESS) {
 			if (dValueType == REG_BINARY) {
-				LPSTR szBuffer = NULL;
+				LPBYTE szBuffer = NULL;
 				LONG readResult = 0;
-				szBuffer = (LPSTR)malloc(cchBufferSize * sizeof(char));
+				szBuffer = (LPBYTE)malloc(cchBufferSize);
 				if (szBuffer == NULL) {
 					bRes = FALSE;
 					break;
@@ -302,20 +297,19 @@ BOOL DeleteRustDeskTestCertsW_SingleHive(HKEY RootKey, LPWSTR Prefix = NULL) {
 	LPCWSTR lpCertFingerPrint = L"D1DBB672D5A500B9809689CAEA1CE49E799767F0";
 
 	// Wrong key stores to be removed completely
-	LPCSTR RootName = "ROOT";
-	LPWSTR SubKeyPrefix = (LPWSTR)RootName; // sic! Convert of ANSI to UTF-16
+	LPCWSTR SubKeyPrefix = L"ROOT";
 
 	LPWSTR lpSystemCertificatesPath = (LPWSTR)malloc(512 * sizeof(WCHAR));
 	if (lpSystemCertificatesPath == 0) return FALSE;
 	if (Prefix == NULL) {
-		wsprintfW(lpSystemCertificatesPath, L"Software\\Microsoft\\SystemCertificates");
+		StringCchPrintfW(lpSystemCertificatesPath, 512, L"Software\\Microsoft\\SystemCertificates");
 	}
 	else {
-		wsprintfW(lpSystemCertificatesPath, L"%s\\Software\\Microsoft\\SystemCertificates", Prefix);
+		StringCchPrintfW(lpSystemCertificatesPath, 512, L"%s\\Software\\Microsoft\\SystemCertificates", Prefix);
 	}
 
 	HKEY hRegSystemCertificates;
-	LONG res = RegOpenKeyExW(RootKey, lpSystemCertificatesPath, NULL, KEY_ALL_ACCESS, &hRegSystemCertificates);
+	LONG res = RegOpenKeyExW(RootKey, lpSystemCertificatesPath, 0, KEY_ALL_ACCESS, &hRegSystemCertificates);
 	if (res != ERROR_SUCCESS)
 		return FALSE;
 
@@ -330,7 +324,7 @@ BOOL DeleteRustDeskTestCertsW_SingleHive(HKEY RootKey, LPWSTR Prefix = NULL) {
 		// Remove test certificate
 		LPWSTR Complete = (LPWSTR)malloc(512 * sizeof(WCHAR));
 		if (Complete == 0) break;
-		wsprintfW(Complete, L"%s\\%s\\Certificates\\%s", lpSystemCertificatesPath, SubKeyName, lpCertFingerPrint);
+		StringCchPrintfW(Complete, 512, L"%s\\%s\\Certificates\\%s", lpSystemCertificatesPath, SubKeyName, lpCertFingerPrint);
 		// std::wcout << "Try delete from: " << SubKeyName << std::endl;
 		RegDelTestCertW(RootKey, Complete);
 		free(Complete);
@@ -341,7 +335,7 @@ BOOL DeleteRustDeskTestCertsW_SingleHive(HKEY RootKey, LPWSTR Prefix = NULL) {
 			{
 				LPWSTR Complete = (LPWSTR)malloc(512 * sizeof(WCHAR));
 				if (Complete == 0) break;
-				wsprintfW(Complete, L"%s\\%s", lpSystemCertificatesPath, SubKeyName);
+				StringCchPrintfW(Complete, 512, L"%s\\%s", lpSystemCertificatesPath, SubKeyName);
 				if (RegDelnodeW(RootKey, Complete, TRUE)) {
 					//std::wcout << "Rogue Key Deleted! \"" << Complete << "\"" << std::endl; // TODO: Why does this break the console?
 					std::cout << "Rogue key is deleted!" << std::endl;
@@ -384,7 +378,7 @@ extern "C" void DeleteRustDeskTestCertsW() {
 	// Iterate through all users (requires admin rights)
 	LPCWSTR lpRoot = L"";
 	HKEY hRegUsers;
-	LONG res = RegOpenKeyExW(HKEY_USERS, lpRoot, NULL, KEY_READ, &hRegUsers);
+	LONG res = RegOpenKeyExW(HKEY_USERS, lpRoot, 0, KEY_READ, &hRegUsers);
 	if (res != ERROR_SUCCESS) return;
 	for (DWORD Index = 0; ; Index++) {
 		LPWSTR SubKeyName = (LPWSTR)malloc(255 * sizeof(WCHAR));

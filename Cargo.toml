@@ -211,6 +211,10 @@ exclude = ["vdi/host", "examples/custom_plugin"]
 # This allows building and running on systems without libxdo installed (e.g., Wayland-only)
 [patch.crates-io]
 libxdo-sys = { path = "libs/libxdo-sys-stub" }
+libsodium-sys = { path = "libs/libsodium-sys" }
+
+[patch.'https://github.com/rustdesk-org/machine-uid']
+machine-uid = { path = "libs/machine-uid" }
 
 [package.metadata.winres]
 LegalCopyright = "Copyright © 2025 Purslane Ltd. All rights reserved."
@@ -218,14 +222,11 @@ ProductName = "RustDesk"
 FileDescription = "RustDesk Remote Desktop"
 OriginalFilename = "rustdesk.exe"
 
-[target.'cfg(target_os="windows")'.build-dependencies]
-winres = "0.1"
-winapi = { version = "0.3", features = [ "winnt", "pdh", "synchapi" ] }
-
 [build-dependencies]
 cc = "1.0"
 hbb_common = { path = "libs/hbb_common" }
 os-version = "0.2"
+winres = "0.1"
 
 [dev-dependencies]
 hound = "3.5"

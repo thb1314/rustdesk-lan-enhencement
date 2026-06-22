@@ -564,7 +564,10 @@ def main():
                 #     'mv target/release/bundle/deb/rustdesk*.deb ./flutter/rustdesk.deb')
                 build_flutter_deb(version, features)
         else:
-            system2('cargo --locked bundle --release --features ' + features)
+            bundle_cmd = 'cargo --locked bundle --release --features ' + features
+            if not osx:
+                bundle_cmd += ' --bin rustdesk --format deb'
+            system2(bundle_cmd)
             if osx:
                 system2(
                     'strip target/release/bundle/osx/RustDesk.app/Contents/MacOS/rustdesk')
@@ -626,9 +629,9 @@ def main():
                 os.system('cp -a res/startwm.sh tmpdeb/etc/rustdesk/')
                 os.system('mkdir -p tmpdeb/etc/X11/rustdesk/')
                 os.system('cp res/xorg.conf tmpdeb/etc/X11/rustdesk/')
-                os.system('cp -a DEBIAN/* tmpdeb/DEBIAN/')
+                os.system('cp -a res/DEBIAN/* tmpdeb/DEBIAN/')
                 os.system('mkdir -p tmpdeb/etc/pam.d/')
-                os.system('cp pam.d/rustdesk.debian tmpdeb/etc/pam.d/rustdesk')
+                os.system('cp res/pam.d/rustdesk.debian tmpdeb/etc/pam.d/rustdesk')
                 system2('strip tmpdeb/usr/bin/rustdesk')
                 system2('mkdir -p tmpdeb/usr/share/rustdesk')
                 system2('mv tmpdeb/usr/bin/rustdesk tmpdeb/usr/share/rustdesk/')
