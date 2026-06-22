@@ -290,7 +290,10 @@ def get_features(args):
 
 
 def generate_control_file(version):
-    control_file_path = "../res/DEBIAN/control"
+    control_dir = Path("../res/DEBIAN")
+    if not control_dir.exists():
+        control_dir = Path("res/DEBIAN")
+    control_file_path = control_dir / "control"
     system2('/bin/rm -rf %s' % control_file_path)
 
     content = """Package: rustdesk
@@ -300,7 +303,7 @@ Version: %s
 Architecture: %s
 Maintainer: rustdesk <info@rustdesk.com>
 Homepage: https://rustdesk.com
-Depends: libgtk-3-0t64 | libgtk-3-0, libxcb-randr0, libxdo3 | libxdo4, libxfixes3, libxcb-shape0, libxcb-xfixes0, libasound2t64 | libasound2, libsystemd0, curl, libva2, libva-drm2, libva-x11-2, libgstreamer-plugins-base1.0-0, libpam0g, gstreamer1.0-pipewire%s
+Depends: libgtk-3-0t64 | libgtk-3-0, libxcb-randr0, libxdo3 | libxdo4, libxfixes3, libxcb-shape0, libxcb-xfixes0, libasound2t64 | libasound2, libsystemd0, curl, libva2, libva-drm2, libva-x11-2, libgstreamer-plugins-base1.0-0, libpam0g, gstreamer1.0-pipewire, fuse3 | fuse, libfuse3-3 | libfuse2t64 | libfuse2%s
 Recommends: libayatana-appindicator3-1
 Description: A remote control software.
 
@@ -611,6 +614,7 @@ def main():
                 # build deb package
                 system2(
                     'mv target/release/bundle/deb/rustdesk*.deb ./rustdesk.deb')
+                system2('/bin/rm -rf tmpdeb/')
                 system2('dpkg-deb -R rustdesk.deb tmpdeb')
                 system2('mkdir -p tmpdeb/usr/share/rustdesk/files/systemd/')
                 system2('mkdir -p tmpdeb/usr/share/icons/hicolor/256x256/apps/')
@@ -629,6 +633,7 @@ def main():
                 os.system('cp -a res/startwm.sh tmpdeb/etc/rustdesk/')
                 os.system('mkdir -p tmpdeb/etc/X11/rustdesk/')
                 os.system('cp res/xorg.conf tmpdeb/etc/X11/rustdesk/')
+                generate_control_file(version)
                 os.system('cp -a res/DEBIAN/* tmpdeb/DEBIAN/')
                 os.system('mkdir -p tmpdeb/etc/pam.d/')
                 os.system('cp res/pam.d/rustdesk.debian tmpdeb/etc/pam.d/rustdesk')
@@ -638,6 +643,7 @@ def main():
                 system2('cp libsciter-gtk.so tmpdeb/usr/share/rustdesk/')
                 md5_file_folder("tmpdeb/")
                 system2('dpkg-deb -b tmpdeb rustdesk.deb; /bin/rm -rf tmpdeb/')
+                system2('/bin/rm -rf res/DEBIAN/control')
                 os.rename('rustdesk.deb', 'rustdesk-%s.deb' % version)
 
 
