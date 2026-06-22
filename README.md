@@ -1,6 +1,23 @@
+# RustDesk LAN Enhancement
+
+This fork focuses on clearer remote desktop sessions on trusted local networks.
+
+- Adds **LAN quality optimization**, enabled automatically for direct LAN sessions. Users can turn it off from the display menu to return to the original RustDesk quality behavior.
+- Raises LAN sessions above the built-in **Best** profile by sending a custom quality value of `1000`, which the server maps to about `20.0x` bitrate instead of the original Best profile's about `1.5x`; it also prefers **True color (4:4:4)** chroma when supported, reducing blur and color loss on text and UI edges.
+- Adds **Image sharpening** with Off/Low/Medium/High presets plus a custom slider. The filter is applied on the viewer side, so it can be adjusted without changing the remote host.
+- Shows the current connection IP/route in the session header and the quality monitor so it is easier to tell whether the session is direct LAN or relayed.
+- Builds the Linux Sciter `.deb` with `inline`, `hwcodec`, and `unix-file-copy-paste`, and declares FUSE runtime dependencies required by Linux file copy/paste.
+
+Recommended Linux package build for this fork:
+
+```sh
+python3 build.py --hwcodec --unix-file-copy-paste
+```
+
+Below is the official original README.
+
 <p align="center">
   <img src="res/logo-header.svg" alt="RustDesk - Your remote desktop"><br>
-  <a href="#lan-quality-enhancements">LAN Enhancements</a> •
   <a href="#raw-steps-to-build">Build</a> •
   <a href="#how-to-build-with-docker">Docker</a> •
   <a href="#file-structure">Structure</a> •
@@ -19,22 +36,6 @@ Chat with us: [Discord](https://discord.gg/nDceKgxnkV) | [Twitter](https://twitt
 [![RustDesk Server Pro](https://img.shields.io/badge/RustDesk%20Server%20Pro-Advanced%20Features-blue)](https://rustdesk.com/pricing.html)
 
 Yet another remote desktop solution, written in Rust. Works out of the box with no configuration required. You have full control of your data, with no concerns about security. You can use our rendezvous/relay server, [set up your own](https://rustdesk.com/server), or [write your own rendezvous/relay server](https://github.com/rustdesk/rustdesk-server-demo).
-
-## LAN Quality Enhancements
-
-This fork focuses on clearer remote desktop sessions on trusted local networks.
-
-- Adds **LAN quality optimization**, enabled automatically for direct LAN sessions. Users can turn it off from the display menu to return to the original RustDesk quality behavior.
-- Raises LAN sessions above the built-in **Best** profile by sending a custom quality value of `1000`, which the server maps to about `20.0x` bitrate instead of the original Best profile's about `1.5x`; it also prefers **True color (4:4:4)** chroma when supported, reducing blur and color loss on text and UI edges.
-- Adds **Image sharpening** with Off/Low/Medium/High presets plus a custom slider. The filter is applied on the viewer side, so it can be adjusted without changing the remote host.
-- Shows the current connection IP/route in the session header and the quality monitor so it is easier to tell whether the session is direct LAN or relayed.
-- Builds the Linux Sciter `.deb` with `inline`, `hwcodec`, and `unix-file-copy-paste`, and declares FUSE runtime dependencies required by Linux file copy/paste.
-
-Recommended Linux package build for this fork:
-
-```sh
-python3 build.py --hwcodec --unix-file-copy-paste
-```
 
 ![image](https://user-images.githubusercontent.com/71636191/171661982-430285f0-2e12-4b1d-9957-4a58e375304d.png)
 

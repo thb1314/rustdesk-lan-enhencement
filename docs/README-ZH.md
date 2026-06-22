@@ -1,6 +1,23 @@
+# RustDesk 局域网增强版
+
+这个 fork 主要面向可信局域网内更清晰的远程桌面体验。
+
+- 新增 **局域网画质优化**，直连局域网会自动开启。用户可以在显示菜单中关闭，关闭后回到 RustDesk 原本的画质策略。
+- 局域网会突破原版内置 **最佳画质** 档位，发送自定义画质值 `1000`，服务端会映射到约 `20.0x` 码率，而原版 Best 档约为 `1.5x`；同时在支持时优先使用 **真彩模式（4:4:4）**，减少文字、图标和 UI 边缘的模糊与色彩损失。
+- 新增 **图像锐化**，支持关闭、低、中、高预设，也支持通过滑杆自定义锐化强度。锐化在控制端本地处理，不需要修改被控端画面源。
+- 在会话标题栏和显示质量监测中显示当前连接 IP/路径，方便判断当前是局域网直连还是中继连接。
+- Linux Sciter `.deb` 使用 `inline`、`hwcodec`、`unix-file-copy-paste` 构建，并在 deb 依赖中声明 Linux 文件复制粘贴需要的 FUSE 运行时组件。
+
+这个 fork 推荐的 Linux 安装包构建命令：
+
+```sh
+python3 build.py --hwcodec --unix-file-copy-paste
+```
+
+下面是官方原版README。
+
 <p align="center">
   <img src="../res/logo-header.svg" alt="RustDesk - Your remote desktop"><br>
-  <a href="#局域网增强">局域网增强</a> •
   <a href="#免费的公共服务器">服务器</a> •
   <a href="#基本构建步骤">编译</a> •
   <a href="#使用-Docker-编译">Docker</a> •
@@ -20,22 +37,6 @@
 远程桌面软件，开箱即用，无需任何配置。您完全掌控数据，不用担心安全问题。您可以使用我们的注册/中继服务器，
 或者[自己设置](https://rustdesk.com/server)，
 亦或者[开发您的版本](https://github.com/rustdesk/rustdesk-server-demo)。
-
-## 局域网增强
-
-这个 fork 主要面向可信局域网内更清晰的远程桌面体验。
-
-- 新增 **局域网画质优化**，直连局域网会自动开启。用户可以在显示菜单中关闭，关闭后回到 RustDesk 原本的画质策略。
-- 局域网会突破原版内置 **最佳画质** 档位，发送自定义画质值 `1000`，服务端会映射到约 `20.0x` 码率，而原版 Best 档约为 `1.5x`；同时在支持时优先使用 **真彩模式（4:4:4）**，减少文字、图标和 UI 边缘的模糊与色彩损失。
-- 新增 **图像锐化**，支持关闭、低、中、高预设，也支持通过滑杆自定义锐化强度。锐化在控制端本地处理，不需要修改被控端画面源。
-- 在会话标题栏和显示质量监测中显示当前连接 IP/路径，方便判断当前是局域网直连还是中继连接。
-- Linux Sciter `.deb` 使用 `inline`、`hwcodec`、`unix-file-copy-paste` 构建，并在 deb 依赖中声明 Linux 文件复制粘贴需要的 FUSE 运行时组件。
-
-这个 fork 推荐的 Linux 安装包构建命令：
-
-```sh
-python3 build.py --hwcodec --unix-file-copy-paste
-```
 
 ![image](https://user-images.githubusercontent.com/71636191/171661982-430285f0-2e12-4b1d-9957-4a58e375304d.png)
 
