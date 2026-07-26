@@ -176,6 +176,35 @@ lazy_static::lazy_static! {
 
 const PUBLIC_SERVER: &str = "public";
 
+fn is_lan_addr(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(ip) => {
+            let octets = ip.octets();
+            ip.is_private()
+                || (octets[0] == 100 && (64..128).contains(&octets[1]))
+                || ip.is_loopback()
+                || ip.is_link_local()
+        }
+        std::net::IpAddr::V6(ip) => {
+            let segments = ip.segments();
+            ip.is_loopback()
+                || (segments[0] & 0xfe00) == 0xfc00
+                || (segments[0] & 0xffc0) == 0xfe80
+        }
+    }
+}
+
+/// Whether `peer` is a bare LAN address, optionally with a port.
+pub fn is_lan_ip(peer: &str) -> bool {
+    if let Ok(ip) = peer.parse::<std::net::IpAddr>() {
+        return is_lan_addr(ip);
+    }
+    if let Ok(addr) = peer.parse::<SocketAddr>() {
+        return is_lan_addr(addr.ip());
+    }
+    false
+}
+
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn get_key_state(key: enigo::Key) -> bool {
     use enigo::KeyboardControllable;
@@ -194,35 +223,39 @@ impl Client {
     const LAN_RECOMMENDED_IMAGE_SHARPENING: i32 = 20;
     const OPTION_LAN_QUALITY_OPTIMIZATION: &'static str = "lan-quality-optimization";
     const OPTION_IMAGE_SHARPENING: &'static str = "image-sharpening";
+    // `option2bool` treats an "enable-" prefix as on-by-default.
+    pub const OPTION_ENABLE_LAN_DIRECT: &'static str = "enable-lan-direct";
     const DEFAULT_IMAGE_SHARPENING: i32 = 0;
     const MAX_IMAGE_SHARPENING: i32 = 100;
+    // A LAN peer answers its direct access port almost immediately; keep the probe
+    // short so a stale discovery entry costs little before the rendezvous fallback.
+    const LAN_DIRECT_TIMEOUT: u64 = 1_000;
 
-    fn is_lan_addr(ip: std::net::IpAddr) -> bool {
-        match ip {
-            std::net::IpAddr::V4(ip) => {
-                let octets = ip.octets();
-                ip.is_private()
-                    || (octets[0] == 100 && (64..128).contains(&octets[1]))
-                    || ip.is_loopback()
-                    || ip.is_link_local()
-            }
-            std::net::IpAddr::V6(ip) => {
-                let segments = ip.segments();
-                ip.is_loopback()
-                    || (segments[0] & 0xfe00) == 0xfc00
-                    || (segments[0] & 0xffc0) == 0xfe80
-            }
-        }
+    /// Whether LAN peers should be reached directly instead of through the
+    /// rendezvous/relay servers. Enabled unless the user turns it off.
+    pub fn is_lan_direct_enabled() -> bool {
+        config::option2bool(
+            Self::OPTION_ENABLE_LAN_DIRECT,
+            &Config::get_option(Self::OPTION_ENABLE_LAN_DIRECT),
+        )
     }
 
-    fn is_lan_ip(peer: &str) -> bool {
-        if let Ok(ip) = peer.parse::<std::net::IpAddr>() {
-            return Self::is_lan_addr(ip);
+    /// The direct access endpoint of `peer` if LAN discovery has seen it at a
+    /// private address. Returns `None` when the feature is off or the peer is
+    /// unknown, in which case the caller must use the rendezvous server.
+    fn lan_direct_endpoint(peer: &str) -> Option<String> {
+        if !Self::is_lan_direct_enabled() {
+            return None;
         }
-        if let Ok(addr) = peer.parse::<SocketAddr>() {
-            return Self::is_lan_addr(addr.ip());
+        let ip = config::LanPeers::load()
+            .peers
+            .iter()
+            .find(|p| p.id == peer)
+            .map(crate::ui_interface::get_lan_peer_ip)?;
+        if ip.is_empty() || !is_lan_ip(&ip) {
+            return None;
         }
-        false
+        Some(check_port(&ip, RELAY_PORT + 1))
     }
 
     fn normalize_image_sharpening(value: i32) -> i32 {
@@ -312,7 +345,7 @@ impl Client {
         if hbb_common::is_ip_str(peer) {
             let endpoint = check_port(peer, RELAY_PORT + 1);
             let conn = connect_tcp_local(endpoint.clone(), None, CONNECT_TIMEOUT).await?;
-            if Self::is_lan_ip(peer) {
+            if is_lan_ip(peer) {
                 interface.update_lan_quality_hint(true);
             }
             return Ok((
@@ -338,6 +371,29 @@ impl Client {
         }
 
         let other_server = interface.get_lch().read().unwrap().other_server.clone();
+        // The peer was seen by LAN discovery, so try its direct access port before
+        // involving the rendezvous server. On success nothing ever reaches the
+        // rendezvous or relay servers; on failure we fall through to the normal path.
+        if other_server.is_none() && !interface.is_force_relay() {
+            if let Some(endpoint) = Self::lan_direct_endpoint(peer) {
+                match connect_tcp_local(endpoint.clone(), None, Self::LAN_DIRECT_TIMEOUT).await {
+                    Ok(conn) => {
+                        log::info!("LAN direct connection to {peer} via {endpoint}");
+                        interface.update_lan_quality_hint(true);
+                        return Ok((
+                            (conn, true, None, None, "TCP", endpoint),
+                            (0, "".to_owned()),
+                            false,
+                        ));
+                    }
+                    Err(err) => {
+                        log::info!(
+                            "LAN direct connection to {peer} via {endpoint} failed ({err}), falling back to rendezvous"
+                        );
+                    }
+                }
+            }
+        }
         let (peer, other_server, key, token) = if let Some((a, b, c)) = other_server.as_ref() {
             (a.as_ref(), b.as_ref(), c.as_ref(), "")
         } else {
@@ -728,10 +784,17 @@ impl Client {
         String,
     )> {
         let direct_failures = interface.get_lch().read().unwrap().direct_failures;
+        // The rendezvous server saw this peer on our own network. Relaying LAN
+        // traffic through a public relay wastes its bandwidth and gets the client
+        // throttled, so keep the connection local unless the user asked for relay.
+        let skip_relay =
+            is_local && !interface.is_force_relay() && Self::is_lan_direct_enabled();
         let mut connect_timeout = 0;
         const MIN: u64 = 1000;
         if is_local || peer_nat_type == NatType::SYMMETRIC {
-            connect_timeout = MIN;
+            // MIN only makes sense as a deadline to start relaying. With no relay
+            // to fall back on, give the direct attempt the usual budget instead.
+            connect_timeout = if skip_relay { CONNECT_TIMEOUT } else { MIN };
         } else {
             if relay_server.is_empty() {
                 connect_timeout = CONNECT_TIMEOUT;
@@ -786,7 +849,7 @@ impl Client {
         let mut direct = !conn.is_err();
         let mut endpoint = peer.to_string();
         if interface.is_force_relay() || conn.is_err() {
-            if !relay_server.is_empty() {
+            if !relay_server.is_empty() && !skip_relay {
                 conn = Self::request_relay(
                     peer_id,
                     relay_server.to_owned(),
@@ -805,6 +868,9 @@ impl Client {
                 typ = "Relay";
                 direct = false;
                 endpoint = relay_server.to_owned();
+            } else if skip_relay {
+                interface.update_direct(Some(false));
+                bail!("Failed to make direct connection to remote desktop on LAN");
             } else {
                 bail!("Failed to make direct connection to remote desktop");
             }
@@ -4390,15 +4456,15 @@ pub mod peer_online {
 
         #[test]
         fn test_lan_ip_detection() {
-            assert!(Client::is_lan_ip("127.0.0.1"));
-            assert!(Client::is_lan_ip("192.168.1.10"));
-            assert!(Client::is_lan_ip("100.64.12.34"));
-            assert!(Client::is_lan_ip("100.64.12.34:21118"));
-            assert!(Client::is_lan_ip("169.254.1.2"));
-            assert!(Client::is_lan_ip("[fc00::1]:21118"));
-            assert!(!Client::is_lan_ip("8.8.8.8"));
-            assert!(!Client::is_lan_ip("2001:4860:4860::8888"));
-            assert!(!Client::is_lan_ip("example.com"));
+            assert!(is_lan_ip("127.0.0.1"));
+            assert!(is_lan_ip("192.168.1.10"));
+            assert!(is_lan_ip("100.64.12.34"));
+            assert!(is_lan_ip("100.64.12.34:21118"));
+            assert!(is_lan_ip("169.254.1.2"));
+            assert!(is_lan_ip("[fc00::1]:21118"));
+            assert!(!is_lan_ip("8.8.8.8"));
+            assert!(!is_lan_ip("2001:4860:4860::8888"));
+            assert!(!is_lan_ip("example.com"));
         }
 
         #[test]

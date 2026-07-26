@@ -3,6 +3,7 @@ var ab = { tags: [], peers: [] };
 var abLoading;
 var abError;
 var current_menu_peer_id = '';
+var current_menu_peer_lanip = '';
 var current_menu_tag = '';
 
 class AddressBook: Reactor.Component
@@ -350,15 +351,20 @@ class SessionList: Reactor.Component {
         var hostname = s[2] || s.hostname || "";
         var platform = s[3] || s.platform || "";
         var alias = s[4] || s.alias || "";
+        // Peers found by LAN discovery carry the address they answered from, so
+        // they can be reached directly instead of through the ID server.
+        var lanip = (this.type == "lan" && s.ip) ? s.ip : "";
+        var subtitle = lanip ? lanip : username + "@" + hostname;
+        var title = lanip ? ("ID: " + id) : (alias ? "ID: " + id : "");
         if (this.style == "list") {
-            return <div .remote-session-link .remote-session-list id={id} platform={platform} title={alias ? "ID: " + id : ""}>
+            return <div .remote-session-link .remote-session-list id={id} lanip={lanip} platform={platform} title={title}>
                 <div .platform style={"background:"+string2RGB(id+platform, 0.5)}>
                     {platform && platformSvg(platform, "white")}
                 </div>
                 <div .name>
                     <div>
                         <div #alias .ellipsis>{alias ? alias : formatId(id)}</div>
-                        <div .username .ellipsis>{username}@{hostname}</div>
+                        <div .username .ellipsis>{subtitle}</div>
                     </div>
                 </div>
                 <div>
@@ -366,10 +372,10 @@ class SessionList: Reactor.Component {
                 </div>
             </div>;
         }
-        return <div .remote-session-link .remote-session id={id} platform={platform} title={alias ? "ID: " + id : ""} style={"background:"+string2RGB(id+platform, 0.5)}>
+        return <div .remote-session-link .remote-session id={id} lanip={lanip} platform={platform} title={title} style={"background:"+string2RGB(id+platform, 0.5)}>
             <div .platform>
                 {platform && platformSvg(platform, "white")}
-                <div .username .ellipsis>{username}@{hostname}</div>
+                <div .username .ellipsis>{subtitle}</div>
             </div>
             <div .text>
                 <div #alias .ellipsis>{alias ? alias : formatId(id)}</div>
@@ -378,13 +384,22 @@ class SessionList: Reactor.Component {
         </div>;
     }
 
+    // Prefer the discovered LAN address so the session never touches the ID or
+    // relay servers. Falls back to the peer ID when no address was discovered.
+    function connectTarget(el) {
+        return (el.attributes["lanip"] || "") || el.id;
+    }
+
     event dblclick $(div.remote-session-link) (evt, me) {
-        createNewConnect(me.id, "connect");
+        createNewConnect(connectTarget(me), "connect");
     }
     
     event click $(#menu) (_, me) {
         var id = me.parent.parent.id;
         var platform = me.parent.parent.attributes["platform"];
+        // The LAN address, if this card came from discovery. Empty for ID/recents/fav
+        // cards, in which case the connect actions keep using the peer id.
+        current_menu_peer_lanip = me.parent.parent.attributes["lanip"] || "";
         this.$(#rdp).style.set{
             display: (platform == "Windows" && is_win) ? "block" : "none",
         };
@@ -426,10 +441,13 @@ class SessionList: Reactor.Component {
     event click $(menu#remote-context li) (evt, me) {
         var action = me.id;
         var id = current_menu_peer_id;
+        // Prefer the discovered LAN address for connect/transfer/rdp so the
+        // session stays on the local network; everything else keys on the id.
+        var target = current_menu_peer_lanip || id;
         if (action == "connect") {
-            createNewConnect(id, "connect");
+            createNewConnect(target, "connect");
         } else if (action == "transfer") {
-            createNewConnect(id, "file-transfer");
+            createNewConnect(target, "file-transfer");
         } else if (action == "wol") {
             handler.send_wol(id);
         } else if (action == "remove") {
@@ -458,7 +476,7 @@ class SessionList: Reactor.Component {
                 is_edit_rdp_port = false;
                 return;
             }
-            createNewConnect(id, "rdp");
+            createNewConnect(target, "rdp");
         } else if (action == "add-fav") {
             var favs = handler.get_fav();
             if (favs.indexOf(id) < 0) {
@@ -474,7 +492,7 @@ class SessionList: Reactor.Component {
             handler.store_fav(favs);
             app.multipleSessions.update();
         } else if (action == "tunnel") {
-            createNewConnect(id, "port-forward");
+            createNewConnect(target, "port-forward");
         } else if (action == "rename") {
             var old_name = handler.get_peer_option(id, "alias");
             var abPeer;

@@ -806,6 +806,21 @@ pub fn peer_exists(id: &str) -> bool {
     PeerConfig::exists(id)
 }
 
+// A discovered peer may carry several addresses in `ip_mac` (the map accumulates
+// over time, and `DiscoveryPeer::is_same_peer` ignores the address). Prefer a
+// private LAN address, and keep the choice deterministic since `ip_mac` is a
+// `HashMap`.
+#[inline]
+pub fn get_lan_peer_ip(peer: &config::DiscoveryPeer) -> String {
+    let mut ips: Vec<&String> = peer.ip_mac.keys().collect();
+    ips.sort();
+    ips.iter()
+        .find(|ip| crate::client::is_lan_ip(ip))
+        .or_else(|| ips.first())
+        .map(|ip| ip.to_string())
+        .unwrap_or_default()
+}
+
 #[inline]
 pub fn get_lan_peers() -> Vec<HashMap<&'static str, String>> {
     config::LanPeers::load()
@@ -817,6 +832,7 @@ pub fn get_lan_peers() -> Vec<HashMap<&'static str, String>> {
                 ("username", peer.username.clone()),
                 ("hostname", peer.hostname.clone()),
                 ("platform", peer.platform.clone()),
+                ("ip", get_lan_peer_ip(peer)),
             ])
         })
         .collect()

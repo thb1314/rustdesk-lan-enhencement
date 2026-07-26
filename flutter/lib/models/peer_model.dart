@@ -22,6 +22,9 @@ class Peer {
   String device_group_name;
   String note;
   bool? sameServer;
+  // Direct LAN address reported by discovery; empty unless this peer came from
+  // the Discovered tab. Lets the card connect without touching the ID/relay server.
+  String ip;
 
   String getId() {
     if (alias != '') {
@@ -45,7 +48,8 @@ class Peer {
         loginName = json['loginName'] ?? '',
         device_group_name = json['device_group_name'] ?? '',
         note = json['note'] is String ? json['note'] : '',
-        sameServer = json['same_server'];
+        sameServer = json['same_server'],
+        ip = json['ip'] ?? '';
 
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
@@ -64,6 +68,7 @@ class Peer {
       'device_group_name': device_group_name,
       'note': note,
       'same_server': sameServer,
+      'ip': ip,
     };
   }
 
@@ -109,6 +114,7 @@ class Peer {
     required this.device_group_name,
     required this.note,
     this.sameServer,
+    this.ip = '',
   });
 
   Peer.loading()
@@ -127,6 +133,7 @@ class Peer {
           loginName: '',
           device_group_name: '',
           note: '',
+          ip: '',
         );
   bool equal(Peer other) {
     return id == other.id &&
@@ -142,7 +149,8 @@ class Peer {
         rdpUsername == other.rdpUsername &&
         device_group_name == other.device_group_name &&
         loginName == other.loginName &&
-        note == other.note;
+        note == other.note &&
+        ip == other.ip;
   }
 
   factory Peer.copy(Peer other) {
@@ -161,7 +169,8 @@ class Peer {
         loginName: other.loginName,
         device_group_name: other.device_group_name,
         note: other.note,
-        sameServer: other.sameServer);
+        sameServer: other.sameServer,
+        ip: other.ip);
     peer.online = other.online;
     return peer;
   }

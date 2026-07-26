@@ -1570,7 +1570,10 @@ void connectInPeerTab(BuildContext context, Peer peer, PeerTabIndex tab,
       }
     }
   }
-  connect(context, peer.id,
+  // For a peer found by LAN discovery, connect straight to its address so the
+  // session never touches the ID/relay servers; otherwise use the RustDesk id.
+  final connectId = (tab == PeerTabIndex.lan && peer.ip.isNotEmpty) ? peer.ip : peer.id;
+  connect(context, connectId,
       password: password,
       isSharedPassword: isSharedPassword,
       isFileTransfer: isFileTransfer,
